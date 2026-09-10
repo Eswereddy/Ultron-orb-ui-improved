@@ -69,6 +69,7 @@ export default function JarvisOrb() {
   const [chatInput, setChatInput] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [revealKey, setRevealKey] = useState(false);
   const chatLogRef = useRef<HTMLDivElement>(null);
 
   // ——— SCENE LIFECYCLE ———
@@ -550,6 +551,11 @@ export default function JarvisOrb() {
       {showSettings && (
         <div className="hud panel ai-settings">
           <div className="panel-title">AI SETUP</div>
+          {aiConfig && (
+            <div className="panel-note current-config">
+              Currently saved: {PROVIDER_LABELS[aiConfig.provider]} · {aiConfig.model}
+            </div>
+          )}
           <div className="panel-row provider-row">
             {PROVIDERS.map((p) => (
               <button
@@ -567,18 +573,28 @@ export default function JarvisOrb() {
             ))}
           </div>
           <label className="panel-label" htmlFor="ai-key-input">
-            API KEY
+            API KEY {settingsApiKey && `(${settingsApiKey.length} chars)`}
           </label>
-          <input
-            id="ai-key-input"
-            type="password"
-            className="panel-input"
-            value={settingsApiKey}
-            onChange={(e) => setSettingsApiKey(e.target.value)}
-            placeholder="paste your free API key"
-            autoComplete="off"
-            spellCheck={false}
-          />
+          <div className="key-input-row">
+            <input
+              id="ai-key-input"
+              type={revealKey ? "text" : "password"}
+              className="panel-input"
+              value={settingsApiKey}
+              onChange={(e) => setSettingsApiKey(e.target.value)}
+              placeholder="paste your free API key"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              className="hud-btn small"
+              onClick={() => setRevealKey((v) => !v)}
+              title="Show/hide key"
+            >
+              {revealKey ? "HIDE" : "SHOW"}
+            </button>
+          </div>
           <label className="panel-label" htmlFor="ai-model-input">
             MODEL
           </label>
