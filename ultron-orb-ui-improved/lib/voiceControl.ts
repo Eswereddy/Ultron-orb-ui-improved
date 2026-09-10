@@ -101,9 +101,17 @@ export class VoiceControl {
   private recognition: SpeechRecognitionLike | null = null;
   private callbacks: VoiceControlCallbacks;
   private shouldRun = false;
+  private muted = false;
+  private lang = "en-US";
 
   constructor(callbacks: VoiceControlCallbacks) {
     this.callbacks = callbacks;
+  }
+
+  /** Sets the recognition language (e.g. "en-US" or "te-IN") for the next start(). */
+  setLanguage(lang: string): void {
+    this.lang = lang;
+    if (this.recognition) this.recognition.lang = lang;
   }
 
   start(): boolean {
@@ -114,10 +122,11 @@ export class VoiceControl {
     }
 
     this.shouldRun = true;
+    this.muted = false;
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = false;
-    recognition.lang = "en-US";
+    recognition.lang = this.lang;
 
     recognition.onresult = (event) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -137,9 +146,10 @@ export class VoiceControl {
     };
 
     // Some browsers stop the recognizer after a period of silence even in
-    // continuous mode — restart it automatically while the feature is on.
+    // continuous mode — restart it automatically while the feature is on,
+    // unless we've been deliberately muted (see pause()/resume() below).
     recognition.onend = () => {
-      if (this.shouldRun) {
+      if (this.shouldRun && !this.muted) {
         try {
           recognition.start();
         } catch {
@@ -158,8 +168,29 @@ export class VoiceControl {
     return true;
   }
 
+  /**
+   * Temporarily stops listening without turning voice mode off — used while
+   * ULTRON is speaking so the microphone doesn't transcribe its own reply.
+   */
+  pause(): void {
+    this.muted = true;
+    this.recognition?.stop();
+  }
+
+  /** Resumes listening after pause(), if voice mode is still meant to be on. */
+  resume(): void {
+    if (!this.shouldRun) return;
+    this.muted = false;
+    try {
+      this.recognition?.start();
+    } catch {
+      // already running — ignore
+    }
+  }
+
   stop(): void {
     this.shouldRun = false;
+    this.muted = false;
     this.recognition?.stop();
     this.recognition = null;
   }
