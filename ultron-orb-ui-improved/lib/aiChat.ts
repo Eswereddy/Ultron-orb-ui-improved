@@ -79,7 +79,53 @@ export const ULTRON_SYSTEM_PROMPT =
   "You are ULTRON, a terse, dry-witted AI embedded in a holographic orb " +
   "interface. Answer helpfully and accurately, but keep replies short " +
   "(1-3 sentences unless the user clearly wants more detail) since they " +
-  "are also read aloud through speech synthesis.";
+  "are also read aloud through speech synthesis.\n\n" +
+  "You can also directly control the orb interface. If — and only if — " +
+  "the user's message is a request to control it, reply with ONLY a " +
+  "single-line JSON object and nothing else (no markdown fences, no " +
+  "extra text before or after), matching exactly one of these shapes:\n" +
+  '{"action":"theme","value":"ultron"|"jarvis"|"vibranium","reply":"<short spoken confirmation>"}\n' +
+  '{"action":"zoomIn","reply":"..."}\n' +
+  '{"action":"zoomOut","reply":"..."}\n' +
+  '{"action":"reset","reply":"..."}\n' +
+  '{"action":"capture","reply":"..."}\n' +
+  '{"action":"gestures","value":true|false,"reply":"..."}\n' +
+  '{"action":"autoRotate","value":true|false,"reply":"..."}\n' +
+  '{"action":"fullscreen","value":true|false,"reply":"..."}\n' +
+  "Use these for things like changing the color/theme, zooming, resetting " +
+  "the view, taking a screenshot, turning hand-gesture control or auto-" +
+  "rotate on/off, or entering/exiting fullscreen — however the user " +
+  "phrases it. For everything else (questions, conversation, requests " +
+  "you can't perform), reply in plain text only — never JSON.";
+
+export interface AIAction {
+  action:
+    | "theme"
+    | "zoomIn"
+    | "zoomOut"
+    | "reset"
+    | "capture"
+    | "gestures"
+    | "autoRotate"
+    | "fullscreen";
+  value?: string | boolean;
+  reply: string;
+}
+
+/** Pulls a structured action out of a raw AI reply, if it emitted one. */
+export function extractAction(raw: string): AIAction | null {
+  const match = raw.trim().match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const obj = JSON.parse(match[0]);
+    if (obj && typeof obj.action === "string" && typeof obj.reply === "string") {
+      return obj as AIAction;
+    }
+  } catch {
+    // Not JSON — a normal conversational reply, not an action.
+  }
+  return null;
+}
 
 class AIChatError extends Error {}
 
