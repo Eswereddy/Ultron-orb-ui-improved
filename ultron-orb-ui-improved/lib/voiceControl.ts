@@ -19,6 +19,9 @@ export interface VoiceControlCallbacks {
   onCommand(command: VoiceCommand): void;
   /** Raw heard phrase, useful for a small "heard: ..." debug readout. */
   onHeard?(text: string): void;
+  /** Fired instead of onCommand when the phrase didn't match a known
+   *  command — a good place to forward it to a conversational AI. */
+  onUnmatched?(text: string): void;
   onError?(message: string): void;
 }
 
@@ -125,6 +128,7 @@ export class VoiceControl {
         this.callbacks.onHeard?.(text);
         const command = parseCommand(text);
         if (command) this.callbacks.onCommand(command);
+        else this.callbacks.onUnmatched?.(text);
       }
     };
 
