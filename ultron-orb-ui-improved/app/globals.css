@@ -381,6 +381,20 @@ body {
   letter-spacing: 0.02em;
 }
 
+.key-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.key-input-row .panel-input {
+  flex: 1;
+}
+
+.current-config {
+  opacity: 0.7;
+  letter-spacing: 0.05em;
+}
+
 .hud-btn.small {
   height: 34px;
   font-size: 11px;
