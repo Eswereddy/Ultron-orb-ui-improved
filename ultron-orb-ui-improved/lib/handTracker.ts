@@ -36,6 +36,12 @@ const OPEN_PALM_RATIO = 1.35;
 const OPEN_PALM_MIN_FINGERS = 3;
 const OPEN_PALM_COOLDOWN_MS = 1200;
 
+// Closed-fist "ask ULTRON" gesture: a finger counts as curled once its tip
+// sits this much *closer* to the wrist than its knuckle.
+const FIST_RATIO = 0.85;
+const FIST_MIN_FINGERS = 4;
+const FIST_COOLDOWN_MS = 1800;
+
 export type GestureMode = "idle" | "spin" | "zoom";
 
 export interface TrackerStatus {
@@ -50,6 +56,8 @@ export interface HandTrackerCallbacks {
   onZoom(factor: number): void;
   /** Called when an open palm is held up — a hands-free way to reset the view. */
   onReset?(): void;
+  /** Called when a closed fist is held up — a hands-free way to ask ULTRON something. */
+  onFist?(): void;
   onStatus(status: TrackerStatus): void;
 }
 
@@ -80,6 +88,7 @@ export class HandTracker {
   private prevZoomDist: number | null = null;
   private lastStatus: TrackerStatus = { hands: 0, mode: "idle" };
   private lastResetAt = 0;
+  private lastFistAt = 0;
 
   constructor(
     video: HTMLVideoElement,
@@ -134,6 +143,8 @@ export class HandTracker {
     this.prevMode = "idle";
     this.prevSpinGrab = null;
     this.prevZoomDist = null;
+    this.lastResetAt = 0;
+    this.lastFistAt = 0;
     const ctx = this.overlay.getContext("2d");
     ctx?.clearRect(0, 0, this.overlay.width, this.overlay.height);
     this.emitStatus({ hands: 0, mode: "idle" });
@@ -199,6 +210,17 @@ export class HandTracker {
       ) {
         this.lastResetAt = performance.now();
         this.callbacks.onReset();
+      }
+
+      // Closed fist (not pinching) held up for a moment opens the AI chat.
+      if (
+        this.callbacks.onFist &&
+        !state.pinching &&
+        isFist(lm, handScale) &&
+        performance.now() - this.lastFistAt > FIST_COOLDOWN_MS
+      ) {
+        this.lastFistAt = performance.now();
+        this.callbacks.onFist();
       }
     });
 
@@ -313,3 +335,21 @@ function isOpenPalm(lm: NormalizedLandmark[], handScale: number): boolean {
   }
   return extended >= OPEN_PALM_MIN_FINGERS;
 }
+
+/** True when index/middle/ring/pinky are all curled in toward the palm. */
+function isFist(lm: NormalizedLandmark[], handScale: number): boolean {
+  if (handScale < 1e-6) return false;
+  const fingers: [number, number][] = [
+    [INDEX_TIP, INDEX_MCP],
+    [MIDDLE_TIP, MIDDLE_MCP],
+    [RING_TIP, RING_MCP],
+    [PINKY_TIP, PINKY_MCP],
+  ];
+  let curled = 0;
+  for (const [tip, mcp] of fingers) {
+    const tipDist = dist2d(lm[tip], lm[WRIST]);
+    const mcpDist = dist2d(lm[mcp], lm[WRIST]);
+    if (tipDist < mcpDist * FIST_RATIO) curled++;
+  }
+  return curled >= FIST_MIN_FINGERS;
+  }
