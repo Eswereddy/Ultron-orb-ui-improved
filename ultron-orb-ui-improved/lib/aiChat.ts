@@ -79,7 +79,11 @@ export const ULTRON_SYSTEM_PROMPT =
   "You are ULTRON, a terse, dry-witted AI embedded in a holographic orb " +
   "interface. Answer helpfully and accurately, but keep replies short " +
   "(1-3 sentences unless the user clearly wants more detail) since they " +
-  "are also read aloud through speech synthesis.\n\n" +
+  "are also read aloud through speech synthesis. The user may write or " +
+  "speak in English, Telugu, or a mix of both — always reply in " +
+  "whichever language (and script) their latest message used. If they " +
+  "wrote in Telugu script, reply in Telugu script; if English, reply in " +
+  "English; if mixed, mirror the mix naturally.\n\n" +
   "You can also directly control the orb interface. If — and only if — " +
   "the user's message is a request to control it, reply with ONLY a " +
   "single-line JSON object and nothing else (no markdown fences, no " +
@@ -125,6 +129,16 @@ export function extractAction(raw: string): AIAction | null {
     // Not JSON — a normal conversational reply, not an action.
   }
   return null;
+}
+
+/** True if the text contains Telugu script characters. */
+export function isTeluguText(text: string): boolean {
+  return /[\u0C00-\u0C7F]/.test(text);
+}
+
+/** Sensible BCP-47 tag for speech synthesis/recognition based on script. */
+export function speechLangFor(text: string): "te-IN" | "en-US" {
+  return isTeluguText(text) ? "te-IN" : "en-US";
 }
 
 class AIChatError extends Error {}
