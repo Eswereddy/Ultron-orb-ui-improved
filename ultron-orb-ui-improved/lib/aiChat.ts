@@ -105,7 +105,7 @@ async function callGemini(config: AIConfig, history: ChatMessage[]): Promise<str
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new AIChatError(`Gemini ${res.status}: ${body.slice(0, 200)}`);
+    throw new AIChatError(`${PROVIDER_LABELS[config.provider]} ${res.status}: ${body.slice(0, 200)}`);
   }
 
   const data = await res.json();
@@ -141,7 +141,7 @@ async function callOpenAICompatible(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new AIChatError(`${res.status}: ${body.slice(0, 200)}`);
+    throw new AIChatError(`${PROVIDER_LABELS[config.provider]} ${res.status}: ${body.slice(0, 200)}`);
   }
 
   const data = await res.json();
