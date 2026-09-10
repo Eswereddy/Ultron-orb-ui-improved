@@ -6,6 +6,7 @@ import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
 import { VoiceControl, isVoiceControlSupported, type VoiceCommand } from "@/lib/voiceControl";
 import {
   askAI,
+  extractAction,
   loadAIConfig,
   saveAIConfig,
   clearAIConfig,
@@ -13,6 +14,7 @@ import {
   PROVIDER_LABELS,
   PROVIDER_KEY_URL,
   type AIConfig,
+  type AIAction,
   type AIProvider,
   type ChatMessage,
 } from "@/lib/aiChat";
@@ -71,6 +73,8 @@ export default function JarvisOrb() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [revealKey, setRevealKey] = useState(false);
   const chatLogRef = useRef<HTMLDivElement>(null);
+  const dispatchActionRef = useRef<(action: AIAction) => void>(() => {});
+  const toggleVoiceRef = useRef<() => void>(() => {});
 
   // ——— SCENE LIFECYCLE ———
   useEffect(() => {
@@ -144,8 +148,11 @@ export default function JarvisOrb() {
         setAiBusy(true);
         askAI(aiConfig, next)
           .then((reply) => {
-            setChatLog((cur) => [...cur, { role: "assistant", content: reply }]);
-            speak(reply);
+            const action = extractAction(reply);
+            const spoken = action ? action.reply : reply;
+            setChatLog((cur) => [...cur, { role: "assistant", content: spoken }]);
+            if (action) dispatchActionRef.current(action);
+            speak(spoken);
           })
           .catch((err: unknown) => {
             setAiError(err instanceof Error ? err.message : "AI REQUEST FAILED");
@@ -214,6 +221,10 @@ export default function JarvisOrb() {
       onRotate: (dt, dp) => sceneRef.current?.rotateBy(dt, dp),
       onZoom: (factor) => sceneRef.current?.zoomBy(factor),
       onReset: () => sceneRef.current?.resetView(),
+      onFist: () => {
+        setShowChat(true);
+        if (!voiceRef.current) toggleVoiceRef.current();
+      },
       onStatus: setStatus,
     });
     trackerRef.current = tracker;
@@ -291,6 +302,52 @@ export default function JarvisOrb() {
     }
   }, []);
 
+  // ——— AI ACTION DISPATCH (lets the AI itself control the orb) ———
+  const dispatchAIAction = useCallback(
+    (action: AIAction) => {
+      switch (action.action) {
+        case "zoomIn":
+          sceneRef.current?.zoomIn();
+          break;
+        case "zoomOut":
+          sceneRef.current?.zoomOut();
+          break;
+        case "reset":
+          sceneRef.current?.resetView();
+          break;
+        case "capture":
+          captureScreenshot();
+          break;
+        case "gestures":
+          if (action.value) void startGestures();
+          else stopGestures();
+          break;
+        case "autoRotate":
+          applyAutoRotate(Boolean(action.value));
+          break;
+        case "theme":
+          if (typeof action.value === "string" && isThemeName(action.value)) {
+            applyTheme(action.value);
+          }
+          break;
+        case "fullscreen":
+          if (action.value) {
+            void document.documentElement.requestFullscreen?.().catch(() => {
+              setError("FULLSCREEN UNAVAILABLE");
+            });
+          } else if (document.fullscreenElement) {
+            void document.exitFullscreen();
+          }
+          break;
+      }
+    },
+    [captureScreenshot, startGestures, stopGestures, applyAutoRotate, applyTheme],
+  );
+
+  useEffect(() => {
+    dispatchActionRef.current = dispatchAIAction;
+  }, [dispatchAIAction]);
+
   // ——— VOICE ———
   const handleVoiceCommand = useCallback(
     (command: VoiceCommand) => {
@@ -349,6 +406,10 @@ export default function JarvisOrb() {
       setError("VOICE CONTROL NOT SUPPORTED");
     }
   }, [handleVoiceCommand, sendToAI]);
+
+  useEffect(() => {
+    toggleVoiceRef.current = toggleVoice;
+  }, [toggleVoice]);
 
   // ——— KEYBOARD SHORTCUTS ———
   useEffect(() => {
@@ -433,7 +494,8 @@ export default function JarvisOrb() {
           <div>
             <span className="key">PINCH + MOVE</span> spin&nbsp;&nbsp;
             <span className="key">PINCH BOTH HANDS ± SPREAD</span> zoom&nbsp;&nbsp;
-            <span className="key">OPEN PALM</span> reset
+            <span className="key">OPEN PALM</span> reset&nbsp;&nbsp;
+            <span className="key">FIST</span> ask ULTRON
           </div>
         ) : (
           <div>
