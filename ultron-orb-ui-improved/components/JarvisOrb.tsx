@@ -4,6 +4,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createOrbScene, THEME_NAMES, type OrbSceneApi, type ThemeName } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
 import { VoiceControl, isVoiceControlSupported, type VoiceCommand } from "@/lib/voiceControl";
+import {
+  askAI,
+  loadAIConfig,
+  saveAIConfig,
+  clearAIConfig,
+  DEFAULT_MODELS,
+  PROVIDER_LABELS,
+  PROVIDER_KEY_URL,
+  type AIConfig,
+  type AIProvider,
+  type ChatMessage,
+} from "@/lib/aiChat";
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -21,6 +33,7 @@ const THEME_LABEL: Record<ThemeName, string> = {
 
 const THEME_STORAGE_KEY = "ultron-orb-theme";
 const AUTO_ROTATE_STORAGE_KEY = "ultron-orb-autorotate";
+const PROVIDERS: AIProvider[] = ["gemini", "groq", "openrouter"];
 
 function isThemeName(value: string | null): value is ThemeName {
   return !!value && (THEME_NAMES as string[]).includes(value);
@@ -44,6 +57,19 @@ export default function JarvisOrb() {
   const [fullscreen, setFullscreen] = useState(false);
   const [showPerf, setShowPerf] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
+
+  // ——— AI CHAT ———
+  const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsProvider, setSettingsProvider] = useState<AIProvider>("gemini");
+  const [settingsApiKey, setSettingsApiKey] = useState("");
+  const [settingsModel, setSettingsModel] = useState(DEFAULT_MODELS.gemini);
+  const [showChat, setShowChat] = useState(false);
+  const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const chatLogRef = useRef<HTMLDivElement>(null);
 
   // ——— SCENE LIFECYCLE ———
   useEffect(() => {
@@ -77,6 +103,89 @@ export default function JarvisOrb() {
   useEffect(() => {
     document.body.dataset.theme = theme;
   }, [theme]);
+
+  // ——— AI CONFIG (loaded once from localStorage) ———
+  useEffect(() => {
+    const saved = loadAIConfig();
+    if (saved) {
+      setAiConfig(saved);
+      setSettingsProvider(saved.provider);
+      setSettingsApiKey(saved.apiKey);
+      setSettingsModel(saved.model);
+    }
+  }, []);
+
+  useEffect(() => {
+    chatLogRef.current?.scrollTo({ top: chatLogRef.current.scrollHeight });
+  }, [chatLog, aiBusy]);
+
+  const speak = useCallback((text: string) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 1.02;
+    window.speechSynthesis.speak(utter);
+  }, []);
+
+  const sendToAI = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      if (!aiConfig) {
+        setAiError("NO AI KEY CONFIGURED — OPEN AI SETUP");
+        setShowSettings(true);
+        return;
+      }
+      setShowChat(true);
+      setAiError(null);
+      setChatLog((prev) => {
+        const next = [...prev, { role: "user" as const, content: trimmed }];
+        setAiBusy(true);
+        askAI(aiConfig, next)
+          .then((reply) => {
+            setChatLog((cur) => [...cur, { role: "assistant", content: reply }]);
+            speak(reply);
+          })
+          .catch((err: unknown) => {
+            setAiError(err instanceof Error ? err.message : "AI REQUEST FAILED");
+          })
+          .finally(() => setAiBusy(false));
+        return next;
+      });
+    },
+    [aiConfig, speak],
+  );
+
+  const handleChatSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      sendToAI(chatInput);
+      setChatInput("");
+    },
+    [chatInput, sendToAI],
+  );
+
+  const saveSettings = useCallback(() => {
+    const config: AIConfig = {
+      provider: settingsProvider,
+      apiKey: settingsApiKey.trim(),
+      model: settingsModel.trim() || DEFAULT_MODELS[settingsProvider],
+    };
+    if (!config.apiKey) {
+      setAiError("ENTER AN API KEY FIRST");
+      return;
+    }
+    saveAIConfig(config);
+    setAiConfig(config);
+    setAiError(null);
+    setShowSettings(false);
+  }, [settingsProvider, settingsApiKey, settingsModel]);
+
+  const forgetSettings = useCallback(() => {
+    clearAIConfig();
+    setAiConfig(null);
+    setSettingsApiKey("");
+  }, []);
 
   useEffect(() => {
     const onFsChange = () => setFullscreen(!!document.fullscreenElement);
@@ -224,6 +333,7 @@ export default function JarvisOrb() {
     const control = new VoiceControl({
       onCommand: handleVoiceCommand,
       onHeard: setHeard,
+      onUnmatched: sendToAI,
       onError: (message) => {
         setError(message);
         setVoiceOn(false);
@@ -237,12 +347,14 @@ export default function JarvisOrb() {
     } else if (!isVoiceControlSupported()) {
       setError("VOICE CONTROL NOT SUPPORTED");
     }
-  }, [handleVoiceCommand]);
+  }, [handleVoiceCommand, sendToAI]);
 
   // ——— KEYBOARD SHORTCUTS ———
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       switch (e.key) {
         case "+":
         case "=":
@@ -283,6 +395,10 @@ export default function JarvisOrb() {
         case "p":
         case "P":
           setShowPerf((prev) => !prev);
+          break;
+        case "k":
+        case "K":
+          setShowChat((prev) => !prev);
           break;
       }
     };
@@ -327,7 +443,8 @@ export default function JarvisOrb() {
             <span className="key">A</span> auto-rotate&nbsp;&nbsp;
             <span className="key">C</span> capture&nbsp;&nbsp;
             <span className="key">F</span> fullscreen&nbsp;&nbsp;
-            <span className="key">V</span> voice
+            <span className="key">V</span> voice&nbsp;&nbsp;
+            <span className="key">K</span> ask ultron
           </div>
         )}
       </div>
@@ -408,7 +525,142 @@ export default function JarvisOrb() {
             {voiceOn ? "VOICE ON" : "VOICE OFF"}
           </button>
         </div>
+        <div className="hud-row">
+          <button
+            type="button"
+            className="hud-btn"
+            aria-pressed={showChat}
+            onClick={() => setShowChat((v) => !v)}
+            title="Talk to ULTRON"
+          >
+            ASK ULTRON
+          </button>
+          <button
+            type="button"
+            className="hud-btn"
+            aria-pressed={showSettings}
+            onClick={() => setShowSettings((v) => !v)}
+            title="Configure AI provider & API key"
+          >
+            {aiConfig ? "AI: " + PROVIDER_LABELS[aiConfig.provider].split(" ")[0] : "AI SETUP"}
+          </button>
+        </div>
       </div>
+
+      {showSettings && (
+        <div className="hud panel ai-settings">
+          <div className="panel-title">AI SETUP</div>
+          <div className="panel-row provider-row">
+            {PROVIDERS.map((p) => (
+              <button
+                key={p}
+                type="button"
+                className="hud-btn small"
+                aria-pressed={settingsProvider === p}
+                onClick={() => {
+                  setSettingsProvider(p);
+                  setSettingsModel(DEFAULT_MODELS[p]);
+                }}
+              >
+                {PROVIDER_LABELS[p]}
+              </button>
+            ))}
+          </div>
+          <label className="panel-label" htmlFor="ai-key-input">
+            API KEY
+          </label>
+          <input
+            id="ai-key-input"
+            type="password"
+            className="panel-input"
+            value={settingsApiKey}
+            onChange={(e) => setSettingsApiKey(e.target.value)}
+            placeholder="paste your free API key"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <label className="panel-label" htmlFor="ai-model-input">
+            MODEL
+          </label>
+          <input
+            id="ai-model-input"
+            type="text"
+            className="panel-input"
+            value={settingsModel}
+            onChange={(e) => setSettingsModel(e.target.value)}
+            spellCheck={false}
+          />
+          <a
+            className="panel-link"
+            href={PROVIDER_KEY_URL[settingsProvider]}
+            target="_blank"
+            rel="noreferrer"
+          >
+            GET A FREE {PROVIDER_LABELS[settingsProvider]} KEY →
+          </a>
+          <div className="panel-row">
+            <button type="button" className="hud-btn small" onClick={saveSettings}>
+              SAVE
+            </button>
+            <button type="button" className="hud-btn small" onClick={forgetSettings}>
+              FORGET KEY
+            </button>
+            <button type="button" className="hud-btn small" onClick={() => setShowSettings(false)}>
+              CLOSE
+            </button>
+          </div>
+          <div className="panel-note">
+            Stored only in this browser&apos;s local storage. Never sent anywhere except the
+            provider you picked above.
+          </div>
+        </div>
+      )}
+
+      {showChat && (
+        <div className="hud panel ai-chat">
+          <div className="panel-title">
+            ASK ULTRON
+            <button
+              type="button"
+              className="panel-close"
+              onClick={() => setShowChat(false)}
+              aria-label="Close chat"
+            >
+              ×
+            </button>
+          </div>
+          <div className="chat-log" ref={chatLogRef}>
+            {chatLog.length === 0 && !aiBusy && (
+              <div className="chat-empty">
+                {aiConfig
+                  ? "Type a question, or just talk while VOICE is on."
+                  : "Open AI SETUP and add a free API key to start."}
+              </div>
+            )}
+            {chatLog.map((m, i) => (
+              <div key={i} className={`chat-msg chat-${m.role}`}>
+                <span className="chat-role">{m.role === "user" ? "YOU" : "ULTRON"}</span>
+                {m.content}
+              </div>
+            ))}
+            {aiBusy && <div className="chat-msg chat-assistant chat-thinking">THINKING…</div>}
+          </div>
+          {aiError && <div className="hud-error chat-error">{aiError}</div>}
+          <form className="chat-input-row" onSubmit={handleChatSubmit}>
+            <input
+              type="text"
+              className="panel-input"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="ask something…"
+              autoComplete="off"
+            />
+            <button type="submit" className="hud-btn small" disabled={aiBusy || !chatInput.trim()}>
+              SEND
+            </button>
+          </form>
+        </div>
+      )}
     </>
   );
 }
