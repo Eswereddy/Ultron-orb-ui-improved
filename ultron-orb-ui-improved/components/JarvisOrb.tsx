@@ -10,6 +10,7 @@ import {
   loadAIConfig,
   saveAIConfig,
   clearAIConfig,
+  speechLangFor,
   DEFAULT_MODELS,
   PROVIDER_LABELS,
   PROVIDER_KEY_URL,
@@ -35,7 +36,10 @@ const THEME_LABEL: Record<ThemeName, string> = {
 
 const THEME_STORAGE_KEY = "ultron-orb-theme";
 const AUTO_ROTATE_STORAGE_KEY = "ultron-orb-autorotate";
+const VOICE_LANG_STORAGE_KEY = "ultron-orb-voice-lang";
 const PROVIDERS: AIProvider[] = ["gemini", "groq", "openrouter"];
+type VoiceLang = "en" | "te";
+const RECOGNITION_LANG: Record<VoiceLang, string> = { en: "en-US", te: "te-IN" };
 
 function isThemeName(value: string | null): value is ThemeName {
   return !!value && (THEME_NAMES as string[]).includes(value);
@@ -72,6 +76,8 @@ export default function JarvisOrb() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [revealKey, setRevealKey] = useState(false);
+  const [voiceLang, setVoiceLangState] = useState<VoiceLang>("en");
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const chatLogRef = useRef<HTMLDivElement>(null);
   const dispatchActionRef = useRef<(action: AIAction) => void>(() => {});
   const toggleVoiceRef = useRef<() => void>(() => {});
@@ -118,6 +124,8 @@ export default function JarvisOrb() {
       setSettingsApiKey(saved.apiKey);
       setSettingsModel(saved.model);
     }
+    const savedLang = window.localStorage.getItem(VOICE_LANG_STORAGE_KEY);
+    if (savedLang === "te" || savedLang === "en") setVoiceLangState(savedLang);
   }, []);
 
   useEffect(() => {
@@ -129,7 +137,33 @@ export default function JarvisOrb() {
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 1.02;
+    utter.lang = speechLangFor(text);
+    const voices = window.speechSynthesis.getVoices();
+    const match = voices.find((v) => v.lang.toLowerCase().startsWith(utter.lang.slice(0, 2)));
+    if (match) utter.voice = match;
+    // Mute the mic while ULTRON is talking so it doesn't transcribe itself,
+    // and pick listening back up the moment it's done — this is what makes
+    // voice mode feel like an actual back-and-forth call.
+    voiceRef.current?.pause();
+    setIsSpeaking(true);
+    utter.onend = () => {
+      setIsSpeaking(false);
+      voiceRef.current?.resume();
+    };
+    utter.onerror = () => {
+      setIsSpeaking(false);
+      voiceRef.current?.resume();
+    };
     window.speechSynthesis.speak(utter);
+  }, []);
+
+  const toggleVoiceLang = useCallback(() => {
+    setVoiceLangState((prev) => {
+      const next: VoiceLang = prev === "en" ? "te" : "en";
+      window.localStorage.setItem(VOICE_LANG_STORAGE_KEY, next);
+      voiceRef.current?.setLanguage(RECOGNITION_LANG[next]);
+      return next;
+    });
   }, []);
 
   const sendToAI = useCallback(
@@ -398,14 +432,16 @@ export default function JarvisOrb() {
         voiceRef.current = null;
       },
     });
+    control.setLanguage(RECOGNITION_LANG[voiceLang]);
     const started = control.start();
     if (started) {
       voiceRef.current = control;
       setVoiceOn(true);
+      setShowChat(true);
     } else if (!isVoiceControlSupported()) {
       setError("VOICE CONTROL NOT SUPPORTED");
     }
-  }, [handleVoiceCommand, sendToAI]);
+  }, [handleVoiceCommand, sendToAI, voiceLang]);
 
   useEffect(() => {
     toggleVoiceRef.current = toggleVoice;
@@ -525,7 +561,13 @@ export default function JarvisOrb() {
         </div>
 
         {error && <div className="hud-error">{error}</div>}
-        {voiceOn && heard && <div className="hud-heard">HEARD: &ldquo;{heard}&rdquo;</div>}
+        {voiceOn && isSpeaking && <div className="hud-heard call-status">ULTRON SPEAKING…</div>}
+        {voiceOn && !isSpeaking && heard && <div className="hud-heard">HEARD: &ldquo;{heard}&rdquo;</div>}
+        {voiceOn && !isSpeaking && !heard && (
+          <div className="hud-heard call-status">
+            LISTENING… ({voiceLang === "te" ? "TELUGU" : "ENGLISH"})
+          </div>
+        )}
 
         <div className="hud-row">
           <button
@@ -586,6 +628,14 @@ export default function JarvisOrb() {
             title="Voice commands (V)"
           >
             {voiceOn ? "VOICE ON" : "VOICE OFF"}
+          </button>
+          <button
+            type="button"
+            className="hud-btn small"
+            onClick={toggleVoiceLang}
+            title="Switch spoken language"
+          >
+            {voiceLang === "te" ? "TELUGU" : "ENGLISH"}
           </button>
         </div>
         <div className="hud-row">
