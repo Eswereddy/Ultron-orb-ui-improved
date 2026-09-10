@@ -242,6 +242,28 @@ body {
   text-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
 }
 
+.call-status {
+  animation: call-pulse 1.6s ease-in-out infinite;
+  letter-spacing: 0.15em;
+}
+
+@keyframes call-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-status {
+    animation: none;
+    opacity: 0.75;
+  }
+}
+
 /* ——— Camera preview panel ——— */
 .camera-panel {
   position: relative;
